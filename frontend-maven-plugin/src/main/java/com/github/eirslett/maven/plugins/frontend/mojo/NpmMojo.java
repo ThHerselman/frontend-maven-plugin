@@ -3,16 +3,23 @@ package com.github.eirslett.maven.plugins.frontend.mojo;
 import com.github.eirslett.maven.plugins.frontend.lib.FrontendPluginFactory;
 import com.github.eirslett.maven.plugins.frontend.lib.ProxyConfig;
 import com.github.eirslett.maven.plugins.frontend.lib.TaskRunnerException;
+
+import org.apache.commons.codec.digest.Md5Crypt;
 import org.apache.maven.execution.MavenSession;
 import org.apache.maven.plugins.annotations.Component;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.settings.crypto.SettingsDecrypter;
+import org.codehaus.plexus.util.Scanner;
 import org.sonatype.plexus.build.incremental.BuildContext;
 
 import java.io.File;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Date;
 
 @Mojo(name="npm",  defaultPhase = LifecyclePhase.GENERATE_RESOURCES, threadSafe = true)
 public final class NpmMojo extends AbstractFrontendMojo {
@@ -28,6 +35,9 @@ public final class NpmMojo extends AbstractFrontendMojo {
     @Parameter(property = "frontend.npm.npmInheritsProxyConfigFromMaven", required = false, defaultValue = "true")
     private boolean npmInheritsProxyConfigFromMaven;
 
+    @Parameter(required = false)
+    private String changeScanFolder;
+    
     /**
      * Registry override, passed as the registry option during npm install if set.
      */
@@ -56,8 +66,23 @@ public final class NpmMojo extends AbstractFrontendMojo {
 
     @Override
     public synchronized void execute(FrontendPluginFactory factory) throws TaskRunnerException {
+    	boolean changed = false;
         File packageJson = new File(workingDirectory, "package.json");
-        if (buildContext == null || buildContext.hasDelta(packageJson) || !buildContext.isIncremental()) {
+		File baseDirFile = session.getCurrentProject().getBasedir();
+
+    	if(buildContext != null && changeScanFolder != null && !changeScanFolder.isEmpty() && baseDirFile != null && buildContext.isIncremental()) {
+    		File scanDir = new File(baseDirFile,changeScanFolder);
+    		Scanner newScanner = buildContext.newScanner(scanDir, false);
+    		newScanner.scan();
+
+    		String[] includedFiles = newScanner.getIncludedFiles();
+    		if(includedFiles != null && includedFiles.length > 0) {
+    			getLog().info(includedFiles.length + " file(s) changes in changeScanFolder");
+    			changed = true;
+    		}
+    	}
+    	
+        if (buildContext == null || (buildContext.hasDelta(packageJson) || (arguments != null && !arguments.contains("install") && changed)) || !buildContext.isIncremental()) {
             ProxyConfig proxyConfig = getProxyConfig();
             factory.getNpmRunner(proxyConfig, getRegistryUrl()).execute(arguments, environmentVariables);
         } else {
